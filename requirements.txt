@@ -2,7 +2,3 @@ streamlit
 plotly
 pandas
 numpy
-math
-logging
-copy
-typing
