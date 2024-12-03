@@ -3,6 +3,7 @@ import logging
 from collections import Counter
 import streamlit as st
 import plotly.graph_objects as go
+import pandas as pd
 
 # ----------------------------- #
 #          Classes              #
@@ -21,7 +22,6 @@ class Box:
         self.length = length
         self.width = width
         self.height = height
-        self.support_threshold_used = 80  # Default support threshold used
         # Assign a unique color for visualization
         color_list = [
             'red', 'green', 'blue', 'orange', 'purple',
@@ -94,25 +94,6 @@ def can_place_box(pallet, placed_boxes, box, x, y, z):
             return False
     return True
 
-def is_supported(placed_boxes, box, support_threshold=80):
-    """Check if the box is supported by at least support_threshold% of its base area."""
-    if box.position[2] == 0:
-        return True, 100  # Base layer is always supported at 100%
-
-    support_area = 0
-    box_area = box.length * box.width
-
-    for other in placed_boxes:
-        if math.isclose(other.position[2] + other.height, box.position[2], abs_tol=1e-6):
-            x_overlap = max(0, min(box.position[0] + box.length, other.position[0] + other.length) - max(box.position[0], other.position[0]))
-            y_overlap = max(0, min(box.position[1] + box.width, other.position[1] + other.width) - max(box.position[1], other.position[1]))
-            overlap_area = x_overlap * y_overlap
-            support_area += overlap_area
-
-    support_percentage = (support_area / box_area) * 100
-    is_sufficient = support_percentage >= support_threshold
-    return is_sufficient, support_percentage
-
 def find_space_for_box(pallet, placed_boxes, box, layers):
     """Try to place the box in existing layers or create a new layer if necessary."""
     support_thresholds = [80, 75, 70, 65, 60]  # Thresholds to try
@@ -126,16 +107,7 @@ def find_space_for_box(pallet, placed_boxes, box, layers):
             for x, y in positions:
                 box.position = (x, y, z)
                 if can_place_box(pallet, placed_boxes, box, x, y, z):
-                    for threshold in support_thresholds:
-                        is_supported_flag, support_percentage = is_supported(placed_boxes, box, support_threshold=threshold)
-                        if is_supported_flag:
-                            # Place the box with this support threshold
-                            box.support_threshold_used = threshold  # Store the threshold used
-                            return True
-                        else:
-                            continue
-                else:
-                    continue
+                    return True  # Placement successful
     # Try to create a new layer
     max_height = max([b.position[2] + b.height for b in placed_boxes], default=0)
     if max_height + box.height > pallet.height:
@@ -148,18 +120,9 @@ def find_space_for_box(pallet, placed_boxes, box, layers):
         for x, y in positions:
             box.position = (x, y, z)
             if can_place_box(pallet, placed_boxes, box, x, y, z):
-                for threshold in support_thresholds:
-                    is_supported_flag, support_percentage = is_supported(placed_boxes, box, support_threshold=threshold)
-                    if is_supported_flag:
-                        # Place the box with this support threshold
-                        layers.add(z)
-                        box.support_threshold_used = threshold
-                        return True
-                    else:
-                        continue
-            else:
-                continue
-    return False
+                layers.add(z)
+                return True  # Placement successful
+    return False  # Placement failed
 
 def generate_possible_positions(pallet, placed_boxes, box, z):
     """Generate possible positions for the box on the given layer z."""
@@ -196,19 +159,28 @@ def place_boxes(pallet, boxes):
 
     for box in boxes_sorted:
         if not find_space_for_box(pallet, placed_boxes, box, layers):
-            logging.error(f"Cannot place box {box.name}.")
-            return []
+            logging.error(f"Cannot place box {box.name} on Pallet {pallet.pallet_id}.")
+            return [], False  # Return empty list and False indicating imperfect arrangement
         placed_boxes.append(box)
         box.placed = True
-        logging.info(f"Placed {box.name} at position {box.position} with dimensions ({box.length}x{box.width}x{box.height}), support threshold used: {box.support_threshold_used}%")
+        logging.info(f"Placed {box.name} at position {box.position} with dimensions ({box.length}x{box.width}x{box.height})")
 
-    return placed_boxes
+    # After placing all boxes, check if the arrangement is perfect (no unused space)
+    is_perfect = check_perfect_arrangement(pallet, placed_boxes)
+    return placed_boxes, is_perfect
+
+def check_perfect_arrangement(pallet, placed_boxes):
+    """Check if the arrangement perfectly fills the pallet."""
+    total_box_volume = sum([box.length * box.width * box.height for box in placed_boxes])
+    pallet_volume = pallet.length * pallet.width * pallet.height
+    # Allow a small tolerance for floating point arithmetic
+    return math.isclose(total_box_volume, pallet_volume, rel_tol=1e-3)
 
 # ----------------------------- #
 #       Visualization Function  #
 # ----------------------------- #
 
-def plot_pallet(pallet, placed_boxes):
+def plot_pallet(pallet, placed_boxes, is_perfect):
     """Visualizes the pallet and placed boxes in 3D."""
     fig = go.Figure()
 
@@ -286,7 +258,7 @@ def plot_pallet(pallet, placed_boxes):
             color=box.color,
             opacity=0.7,
             name=box.name,
-            hovertext=f'{box.name}: {box.length}x{box.width}x{box.height}, Support: {box.support_threshold_used}%',
+            hovertext=f'{box.name}: {box.length}x{box.width}x{box.height}',
             hoverinfo='text'
         ))
 
@@ -324,13 +296,24 @@ def plot_pallet(pallet, placed_boxes):
             xaxis=dict(nticks=10, range=[0, pallet.length], title="Length"),
             yaxis=dict(nticks=10, range=[0, pallet.width], title="Width"),
             zaxis=dict(nticks=10, range=[0, pallet.height], title="Height"),
-            aspectmode='data'
+            aspectmode='data',
+            camera=dict(
+                eye=dict(x=1.5, y=1.5, z=1.5)
+            ),
+            bgcolor='white'
         ),
+        plot_bgcolor='white',
+        paper_bgcolor='white',
         width=800,
         height=600,
         margin=dict(r=20, l=10, b=10, t=10),
         legend=dict(title='Boxes')
     )
+
+    if is_perfect:
+        fig.update_layout(title=f"Pallet {pallet.pallet_id}: Perfect Arrangement")
+    else:
+        fig.update_layout(title=f"Pallet {pallet.pallet_id}: Minimal Volumetric Weight Arrangement")
 
     return fig
 
@@ -343,13 +326,23 @@ def main():
     logging.basicConfig(level=logging.INFO, format='%(message)s')
 
     st.title("Pallet Box Placement Tool")
-    st.write("Enter the details of the boxes to arrange them on a pallet.")
+    st.write("Enter the details of the boxes and multiple pallets to arrange them optimally.")
 
-    # Sidebar for Pallet Dimensions
+    # Sidebar for Multiple Pallet Dimensions
     st.sidebar.header("Pallet Dimensions")
-    pallet_length = st.sidebar.number_input("Pallet Length (units)", value=80)
-    pallet_width = st.sidebar.number_input("Pallet Width (units)", value=60)
-    pallet_height = st.sidebar.number_input("Pallet Height (units)", value=115)
+    num_pallets = st.sidebar.number_input("Number of Pallets", min_value=1, max_value=10, value=1, step=1)
+
+    pallet_dimensions = []
+    for i in range(int(num_pallets)):
+        st.sidebar.subheader(f"Pallet {i+1} Dimensions")
+        length = st.sidebar.number_input(f"Pallet {i+1} Length (units)", value=80.0, step=1.0, key=f"pallet_length_{i}")
+        width = st.sidebar.number_input(f"Pallet {i+1} Width (units)", value=60.0, step=1.0, key=f"pallet_width_{i}")
+        height = st.sidebar.number_input(f"Pallet {i+1} Height (units)", value=115.0, step=1.0, key=f"pallet_height_{i}")
+        pallet_dimensions.append({
+            'length': length,
+            'width': width,
+            'height': height
+        })
 
     # Box Details Input
     st.header("Box Details")
@@ -365,7 +358,7 @@ def main():
         width = st.number_input(f"Width for Box {i+1} (units)", value=30.0, step=1.0, key=f"width_{i}")
         height = st.number_input(f"Height for Box {i+1} (units)", value=10.0, step=1.0, key=f"height_{i}")
         weight = st.number_input(f"Weight for Box {i+1} (kg)", value=1.0, step=0.1, key=f"weight_{i}")
-        quantity = st.number_input(f"Quantity for Box {i+1}", min_value=1, max_value=100, value=1, step=1, key=f"quantity_{i}")
+        quantity = st.number_input(f"Quantity for Box {i+1}", min_value=1, max_value=1000, value=1, step=1, key=f"quantity_{i}")
         box_details.append({
             'name': name,
             'length': length,
@@ -376,51 +369,76 @@ def main():
         })
 
     if st.button("Run"):
-        # Instantiate Pallet
-        pallet = Pallet(length=pallet_length, width=pallet_width, height=pallet_height, pallet_id=1)
+        all_results = []
 
-        # Instantiate Boxes
-        boxes = []
-        box_id = 0
-        for box_def in box_details:
-            for _ in range(int(box_def['quantity'])):
-                boxes.append(Box(
-                    name=box_def['name'],
-                    length=box_def['length'],
-                    width=box_def['width'],
-                    height=box_def['height'],
-                    weight=box_def['weight'],
-                    box_id=box_id
-                ))
-                box_id += 1
+        for idx, dims in enumerate(pallet_dimensions):
+            # Instantiate Pallet
+            pallet = Pallet(length=dims['length'], width=dims['width'], height=dims['height'], pallet_id=idx+1)
 
-        # Place Boxes
-        placed_boxes = place_boxes(pallet, boxes)
+            # Instantiate Boxes
+            boxes = []
+            box_id = 0
+            for box_def in box_details:
+                for _ in range(int(box_def['quantity'])):
+                    boxes.append(Box(
+                        name=box_def['name'],
+                        length=box_def['length'],
+                        width=box_def['width'],
+                        height=box_def['height'],
+                        weight=box_def['weight'],
+                        box_id=box_id
+                    ))
+                    box_id += 1
 
-        if placed_boxes:
-            volumetric_weight = calculate_volumetric_weight(pallet, placed_boxes)
-            st.success("All boxes have been placed successfully.")
-            st.write(f"**Volumetric Weight:** {volumetric_weight:.2f} kg")
+            # Place Boxes
+            placed_boxes, is_perfect = place_boxes(pallet, boxes)
 
-            # Display placement details
-            placement_details = []
-            for box in placed_boxes:
-                placement_details.append({
-                    'Box Name': box.name,
-                    'Position (x, y, z)': box.position,
-                    'Dimensions (LxWxH)': f"{box.length}x{box.width}x{box.height}",
-                    'Support Threshold Used (%)': box.support_threshold_used
-                })
-            st.subheader("Placement Details")
-            st.table(placement_details)
+            if placed_boxes:
+                volumetric_weight = calculate_volumetric_weight(pallet, placed_boxes)
+                result = {
+                    'pallet_id': pallet.pallet_id,
+                    'volumetric_weight': volumetric_weight,
+                    'is_perfect': is_perfect,
+                    'placed_boxes': placed_boxes
+                }
+                all_results.append(result)
+            else:
+                st.error(f"Failed to place all boxes on Pallet {pallet.pallet_id}. Please check the pallet dimensions or box sizes.")
+                continue  # Skip to the next pallet
 
-            # Visualize the arrangement
-            st.subheader("3D Visualization of Pallet Arrangement")
-            fig = plot_pallet(pallet, placed_boxes)
-            st.plotly_chart(fig, use_container_width=True)
+        if all_results:
+            for result in all_results:
+                pallet_id = result['pallet_id']
+                volumetric_weight = result['volumetric_weight']
+                is_perfect = result['is_perfect']
+                placed_boxes = result['placed_boxes']
 
-        else:
-            st.error("Failed to place all boxes. Please check the pallet dimensions or box sizes.")
+                st.success(f"Pallet {pallet_id} has been arranged successfully.")
+                st.write(f"**Volumetric Weight:** {volumetric_weight:.2f} kg")
+
+                # Display placement details
+                placement_details = []
+                for box in placed_boxes:
+                    placement_details.append({
+                        'Box Name': box.name,
+                        'Position (x, y, z)': box.position,
+                        'Dimensions (LxWxH)': f"{box.length}x{box.width}x{box.height}"
+                    })
+                st.subheader(f"Pallet {pallet_id} Placement Details")
+                st.table(placement_details)
+
+                # Visualize the arrangement
+                if is_perfect:
+                    st.subheader(f"Pallet {pallet_id} 3D Visualization (Perfect Arrangement)")
+                else:
+                    st.subheader(f"Pallet {pallet_id} 3D Visualization (Minimal Volumetric Weight)")
+
+                fig = plot_pallet(pallet, placed_boxes, is_perfect)
+                st.plotly_chart(fig, use_container_width=True)
+
+# ----------------------------- #
+#          Streamlit App        #
+# ----------------------------- #
 
 if __name__ == "__main__":
     main()
