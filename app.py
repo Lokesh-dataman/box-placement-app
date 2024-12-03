@@ -181,6 +181,13 @@ def calculate_volumetric_weight(pallet, placed_boxes):
     volumetric_weight = (pallet.length * pallet.width * max_height) / 6000  # Divided by 6000 as per standard volumetric weight calculation
     return volumetric_weight
 
+def check_perfect_arrangement(pallet, placed_boxes):
+    """Check if the arrangement perfectly fills the pallet."""
+    total_box_volume = sum([box.length * box.width * box.height for box in placed_boxes])
+    pallet_volume = pallet.length * pallet.width * pallet.height
+    # Allow a small tolerance for floating point arithmetic
+    return math.isclose(total_box_volume, pallet_volume, rel_tol=1e-3)
+
 # ----------------------------- #
 #       Placement Function      #
 # ----------------------------- #
@@ -201,18 +208,11 @@ def place_boxes(pallet, boxes):
             return [], False  # Return empty list and False indicating imperfect arrangement
         placed_boxes.append(box)
         box.placed = True
-        logging.info(f"Placed {box.name} at {box.position} with dimensions ({box.length}x{box.width}x{box.height})")
+        logging.info(f"Placed {box.name} at position {box.position} with dimensions ({box.length}x{box.width}x{box.height}), support threshold used: {box.support_threshold_used}%")
 
     # After placing all boxes, check if the arrangement is perfect (no unused space)
     is_perfect = check_perfect_arrangement(pallet, placed_boxes)
     return placed_boxes, is_perfect
-
-def check_perfect_arrangement(pallet, placed_boxes):
-    """Check if the arrangement perfectly fills the pallet."""
-    total_box_volume = sum([box.length * box.width * box.height for box in placed_boxes])
-    pallet_volume = pallet.length * pallet.width * pallet.height
-    # Allow a small tolerance for floating point arithmetic
-    return math.isclose(total_box_volume, pallet_volume, rel_tol=1e-3)
 
 # ----------------------------- #
 #       Visualization Function  #
@@ -296,7 +296,7 @@ def plot_pallet(pallet, placed_boxes, is_perfect):
             color=box.color,
             opacity=0.7,
             name=box.name,
-            hovertext=f'{box.name}: {box.length}x{box.width}x{box.height}',
+            hovertext=f'{box.name}: {box.length}x{box.width}x{box.height}, Support: {box.support_threshold_used}%',
             hoverinfo='text'
         ))
 
@@ -428,7 +428,7 @@ def main():
                     ))
                     box_id += 1
 
-            # Place Boxes
+            # Place Boxes using your existing logic
             placed_boxes, is_perfect = place_boxes(pallet, boxes)
 
             if placed_boxes:
@@ -465,14 +465,14 @@ def main():
                 st.subheader(f"Pallet {pallet_id} Placement Details")
                 st.table(placement_details)
 
-                # Visualize the arrangement
+                # Visualize the arrangement with a unique key
                 if is_perfect:
                     st.subheader(f"Pallet {pallet_id} 3D Visualization (Perfect Arrangement)")
                 else:
                     st.subheader(f"Pallet {pallet_id} 3D Visualization (Minimal Volumetric Weight)")
 
                 fig = plot_pallet(pallet, placed_boxes, is_perfect)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key=f"plot_pallet_{pallet_id}")
 
 # ----------------------------- #
 #          Streamlit App        #
