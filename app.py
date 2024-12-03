@@ -22,6 +22,7 @@ class Box:
         self.length = length
         self.width = width
         self.height = height
+        self.support_threshold_used = 80  # Default support threshold used
         # Assign a unique color for visualization
         color_list = [
             'red', 'green', 'blue', 'orange', 'purple',
@@ -94,6 +95,25 @@ def can_place_box(pallet, placed_boxes, box, x, y, z):
             return False
     return True
 
+def is_supported(placed_boxes, box, support_threshold=80):
+    """Check if the box is supported by at least support_threshold% of its base area."""
+    if box.position[2] == 0:
+        return True, 100  # Base layer is always supported at 100%
+
+    support_area = 0
+    box_area = box.length * box.width
+
+    for other in placed_boxes:
+        if math.isclose(other.position[2] + other.height, box.position[2], abs_tol=1e-6):
+            x_overlap = max(0, min(box.position[0] + box.length, other.position[0] + other.length) - max(box.position[0], other.position[0]))
+            y_overlap = max(0, min(box.position[1] + box.width, other.position[1] + other.width) - max(box.position[1], other.position[1]))
+            overlap_area = x_overlap * y_overlap
+            support_area += overlap_area
+
+    support_percentage = (support_area / box_area) * 100
+    is_sufficient = support_percentage >= support_threshold
+    return is_sufficient, support_percentage
+
 def find_space_for_box(pallet, placed_boxes, box, layers):
     """Try to place the box in existing layers or create a new layer if necessary."""
     support_thresholds = [80, 75, 70, 65, 60]  # Thresholds to try
@@ -107,7 +127,16 @@ def find_space_for_box(pallet, placed_boxes, box, layers):
             for x, y in positions:
                 box.position = (x, y, z)
                 if can_place_box(pallet, placed_boxes, box, x, y, z):
-                    return True  # Placement successful
+                    for threshold in support_thresholds:
+                        is_supported_flag, support_percentage = is_supported(placed_boxes, box, support_threshold=threshold)
+                        if is_supported_flag:
+                            # Place the box with this support threshold
+                            box.support_threshold_used = threshold  # Store the threshold used
+                            return True  # Placement successful
+                        else:
+                            continue
+                else:
+                    continue
     # Try to create a new layer
     max_height = max([b.position[2] + b.height for b in placed_boxes], default=0)
     if max_height + box.height > pallet.height:
@@ -120,8 +149,17 @@ def find_space_for_box(pallet, placed_boxes, box, layers):
         for x, y in positions:
             box.position = (x, y, z)
             if can_place_box(pallet, placed_boxes, box, x, y, z):
-                layers.add(z)
-                return True  # Placement successful
+                for threshold in support_thresholds:
+                    is_supported_flag, support_percentage = is_supported(placed_boxes, box, support_threshold=threshold)
+                    if is_supported_flag:
+                        # Place the box with this support threshold
+                        layers.add(z)
+                        box.support_threshold_used = threshold
+                        return True  # Placement successful
+                    else:
+                        continue
+            else:
+                continue
     return False  # Placement failed
 
 def generate_possible_positions(pallet, placed_boxes, box, z):
@@ -163,7 +201,7 @@ def place_boxes(pallet, boxes):
             return [], False  # Return empty list and False indicating imperfect arrangement
         placed_boxes.append(box)
         box.placed = True
-        logging.info(f"Placed {box.name} at position {box.position} with dimensions ({box.length}x{box.width}x{box.height})")
+        logging.info(f"Placed {box.name} at {box.position} with dimensions ({box.length}x{box.width}x{box.height})")
 
     # After placing all boxes, check if the arrangement is perfect (no unused space)
     is_perfect = check_perfect_arrangement(pallet, placed_boxes)
