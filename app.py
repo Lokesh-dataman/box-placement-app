@@ -360,23 +360,6 @@ def plot_pallet(pallet, placed_boxes, is_perfect):
 # ----------------------------- #
 
 def main():
-    # ----------------------------- #
-    #       Custom CSS Injection    #
-    # ----------------------------- #
-    hide_streamlit_style = """
-                <style>
-                /* Hide the main menu (hamburger) */
-                #MainMenu {visibility: hidden;}
-                
-                /* Hide the footer (includes "Hosted with Streamlit") */
-                footer {visibility: hidden;}
-                
-                /* Optionally hide the header */
-                header {visibility: hidden;}
-                </style>
-                """
-    st.markdown(hide_streamlit_style, unsafe_allow_html=True)
-
     # Configure logging
     logging.basicConfig(level=logging.INFO, format='%(message)s')
 
