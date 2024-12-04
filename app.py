@@ -452,6 +452,9 @@ def main():
                 volumetric_weight = calculate_volumetric_weight(pallet, placed_boxes)
                 result = {
                     'pallet_id': pallet.pallet_id,
+                    'length': pallet.length,
+                    'width': pallet.width,
+                    'height': pallet.height,
                     'volumetric_weight': volumetric_weight,
                     'is_perfect': is_perfect,
                     'placed_boxes': placed_boxes
@@ -464,9 +467,15 @@ def main():
         if all_results:
             for result in all_results:
                 pallet_id = result['pallet_id']
+                length = result['length']
+                width = result['width']
+                height = result['height']
                 volumetric_weight = result['volumetric_weight']
                 is_perfect = result['is_perfect']
                 placed_boxes = result['placed_boxes']
+
+                # Reconstruct the Pallet object with its unique dimensions
+                pallet = Pallet(length=length, width=width, height=height, pallet_id=pallet_id)
 
                 st.success(f"Pallet {pallet_id} has been arranged successfully.")
                 st.write(f"**Volumetric Weight:** {volumetric_weight:.2f} kg")
