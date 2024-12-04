@@ -189,6 +189,32 @@ def check_perfect_arrangement(pallet, placed_boxes):
     return math.isclose(total_box_volume, pallet_volume, rel_tol=1e-3)
 
 # ----------------------------- #
+#       Placement Function      #
+# ----------------------------- #
+
+def place_boxes(pallet, boxes):
+    """Place all boxes onto the pallet."""
+    placed_boxes = []
+    layers = set([0])  # Start with the base layer at z = 0
+
+    # Group boxes by dimensions and quantity
+    groups = group_boxes_by_dimensions(boxes)
+    # Sort boxes by group priority
+    boxes_sorted = sort_boxes_by_group_priority(groups)
+
+    for box in boxes_sorted:
+        if not find_space_for_box(pallet, placed_boxes, box, layers):
+            logging.error(f"Cannot place box {box.name} on Pallet {pallet.pallet_id}.")
+            return [], False  # Return empty list and False indicating imperfect arrangement
+        placed_boxes.append(box)
+        box.placed = True
+        logging.info(f"Placed {box.name} at position {box.position} with dimensions ({box.length}x{box.width}x{box.height}), support threshold used: {box.support_threshold_used}%")
+
+    # After placing all boxes, check if the arrangement is perfect (no unused space)
+    is_perfect = check_perfect_arrangement(pallet, placed_boxes)
+    return placed_boxes, is_perfect
+
+# ----------------------------- #
 #       Visualization Function  #
 # ----------------------------- #
 
@@ -342,7 +368,7 @@ def main():
                 /* Hide the main menu (hamburger) */
                 #MainMenu {visibility: hidden;}
                 
-                /* Hide the footer (includes "Made with Streamlit") */
+                /* Hide the footer (includes "Hosted with Streamlit") */
                 footer {visibility: hidden;}
                 
                 /* Optionally hide the header */
